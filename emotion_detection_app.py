@@ -5,201 +5,209 @@ import os
 import time
 import tensorflow as tf
 
+# Clear any existing TensorFlow sessions at startup
+tf.keras.backend.clear_session()
+
 # Set page config
 st.set_page_config(page_title="Emotion Detection App", layout="wide")
 
-# Add custom CSS for styling
-st.markdown("""
-    <style>
-        .stButton>button {
-            width: 100%;
-            height: 50px;
-            font-size: 20px;
-        }
-        .permission-box {
-            padding: 20px;
-            border-radius: 10px;
-            border: 2px solid #ff4b4b;
-            margin-bottom: 20px;
-        }
-    </style>
-""", unsafe_allow_html=True)
-
 # Title and description
 st.title("Real-time Emotion Detection")
+st.write("Choose a model and start detecting emotions!")
 
-# Camera permission handling
-if 'camera_initialized' not in st.session_state:
-    st.session_state['camera_initialized'] = False
+# Model selection
+model_choice = st.radio(
+    "Select the model for emotion detection:",
+    ("CNN Model", "ViT-CNN Model")
+)
 
-# Display camera permission instructions prominently
-st.markdown("""
-    <div class='permission-box'>
-        <h2>📸 Camera Access Required</h2>
-        <p>Before using this app:</p>
-        <ol>
-            <li>Click the camera icon in your browser's address bar (top-left)</li>
-            <li>Select "Allow" for camera access</li>
-            <li>Click the "Test Camera" button below</li>
-        </ol>
-    </div>
-""", unsafe_allow_html=True)
+# Dictionary to label emotion categories
+emotion_dict = {0: "Angry", 1: "Disgust", 2: "Fear", 3: "Happy", 4: "Neutral", 5: "Sad", 6: "Surprise"}
 
-# Create two columns for camera controls
-col1, col2 = st.columns(2)
-
-with col1:
-    test_camera = st.button("🎥 Test Camera")
-with col2:
-    retry_button = st.button("🔄 Retry Camera")
-
-if test_camera or retry_button:
+def get_model():
+    # Clear the session before loading a new model
+    tf.keras.backend.clear_session()
+    
     try:
-        # Clear previous error messages
-        if 'error' in st.session_state:
-            del st.session_state['error']
+        if model_choice == "CNN Model":
+            model_path = 'Trained_Model.h5'
+        else:
+            model_path = 'emotion_vit_cnn_model.h5'
+            
+        # Load model with custom object scope
+        with tf.keras.utils.custom_object_scope({}):
+            model = tf.keras.models.load_model(model_path, compile=False)
+            model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+        return model
         
-        # Try to open camera
+    except Exception as e:
+        st.error(f"Error loading model: {str(e)}")
+        return None
+
+# Initialize face detection
+@st.cache_resource
+def load_face_cascade():
+    try:
+        cascade_path = os.path.join(cv2.data.haarcascades, 'haarcascade_frontalface_default.xml')
+        return cv2.CascadeClassifier(cascade_path)
+    except Exception as e:
+        st.error(f"Error loading face cascade: {str(e)}")
+        return None
+
+# Load face cascade
+face_cascade = load_face_cascade()
+
+if face_cascade is None:
+    st.error("Failed to load face detection model. Please check your installation.")
+    st.stop()
+
+# Create a placeholder for the camera feed
+video_placeholder = st.empty()
+
+# Add control buttons
+col1, col2 = st.columns(2)
+with col1:
+    start_button = st.button("Start Camera")
+with col2:
+    stop_button = st.button("Stop Camera")
+
+# Check if model choice has changed
+if 'previous_model_choice' not in st.session_state:
+    st.session_state['previous_model_choice'] = model_choice
+elif st.session_state['previous_model_choice'] != model_choice:
+    # Model choice changed, clear the session and model
+    if 'model' in st.session_state:
+        del st.session_state['model']
+    tf.keras.backend.clear_session()
+    st.session_state['previous_model_choice'] = model_choice
+
+# Update session state based on button clicks
+if start_button:
+    st.session_state['run_camera'] = True
+    # Load model when starting camera
+    try:
+        if 'model' not in st.session_state:
+            with st.spinner('Loading model...'):
+                st.session_state['model'] = get_model()
+    except Exception as e:
+        st.error(f"Error loading model: {str(e)}")
+        st.session_state['run_camera'] = False
+
+if stop_button:
+    st.session_state['run_camera'] = False
+    # Clear the model when stopping
+    if 'model' in st.session_state:
+        del st.session_state['model']
+    tf.keras.backend.clear_session()
+
+# Initialize camera state if not exists
+if 'run_camera' not in st.session_state:
+    st.session_state['run_camera'] = False
+
+def show_frame(placeholder, frame):
+    """Helper function to display frame in a version-compatible way"""
+    try:
+        placeholder.image(frame, channels="RGB", use_container_width=True)
+    except TypeError:
+        try:
+            placeholder.image(frame, channels="RGB", width=None)
+        except:
+            placeholder.image(frame, channels="RGB")
+
+if st.session_state['run_camera'] and 'model' in st.session_state:
+    try:
         cap = cv2.VideoCapture(0)
         
-        if not cap.isOpened():
-            st.session_state['error'] = """
-                ### ❌ Camera access failed!
+        while st.session_state['run_camera']:
+            ret, frame = cap.read()
+            if not ret:
+                st.error("Failed to access the camera!")
+                break
+
+            # Convert to grayscale
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+            # Detect faces
+            faces = face_cascade.detectMultiScale(
+                gray,
+                scaleFactor=1.1,
+                minNeighbors=5,
+                minSize=(30, 30)
+            )
+
+            # Process each detected face
+            for (x, y, w, h) in faces:
+                # Draw rectangle around face
+                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
                 
-                Please try these steps:
-                1. Click the camera icon in your browser's address bar
-                2. Select "Allow" for camera access
-                3. Click "Retry Camera" button
-                
-                If still not working:
-                - Try using Chrome or Firefox
-                - Check if camera is being used by another application
-                - Try refreshing the page
-            """
-        else:
-            # Successfully accessed camera
-            st.session_state['camera_initialized'] = True
-            st.success("✅ Camera access successful! You can now start emotion detection.")
-            # Release camera immediately after test
-            cap.release()
+                # Extract and preprocess face region
+                roi_gray = gray[y:y+h, x:x+w]
+                roi_gray = cv2.resize(roi_gray, (48, 48), interpolation=cv2.INTER_AREA)
+
+                if np.sum([roi_gray]) != 0:
+                    # Normalize and reshape for model input
+                    roi = roi_gray.astype('float') / 255.0
+                    roi = np.expand_dims(roi, axis=-1)
+                    roi = np.expand_dims(roi, axis=0)
+
+                    try:
+                        # Predict emotion
+                        prediction = st.session_state['model'].predict(roi, verbose=0)[0]
+                        emotion_label = emotion_dict[np.argmax(prediction)]
+                        confidence = float(np.max(prediction) * 100)
+
+                        # Display emotion and confidence
+                        label_text = f"{emotion_label} ({confidence:.1f}%)"
+                        cv2.putText(frame, label_text, (x, y-10),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                    except Exception as e:
+                        st.error(f"Prediction error: {str(e)}")
+                        # If prediction fails, try to reload the model
+                        st.session_state['model'] = get_model()
+
+            # Convert BGR to RGB for Streamlit display
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
+            # Display the frame
+            show_frame(video_placeholder, frame_rgb)
+            
+            # Small delay to reduce CPU usage
+            time.sleep(0.01)
+
     except Exception as e:
-        st.session_state['error'] = f"""
-            ### ❌ Camera error:
-            {str(e)}
-            
-            Please try:
-            1. Using a different browser (Chrome recommended)
-            2. Checking camera permissions
-            3. Ensuring no other app is using your camera
-        """
+        st.error(f"Camera error: {str(e)}")
     finally:
         if 'cap' in locals():
             cap.release()
 
-# Display any errors
-if 'error' in st.session_state:
-    st.markdown(st.session_state['error'])
+# Create info columns
+info_col1, info_col2 = st.columns(2)
 
-# Only show the main app if camera is initialized
-if st.session_state['camera_initialized']:
-    st.write("Choose a model and start detecting emotions!")
+with info_col1:
+    st.markdown("""
+    ### Instructions:
+    1. Select your preferred model
+    2. Click "Start Camera" to begin
+    3. Watch real-time emotion detection
+    4. Click "Stop Camera" to end
+    5. Refresh page to switch models
+    """)
 
-    # Model selection
-    model_choice = st.radio(
-        "Select the model for emotion detection:",
-        ("CNN Model", "ViT-CNN Model")
-    )
+with info_col2:
+    st.markdown("""
+    ### Detected Emotions:
+    - 😠 Angry
+    - 🤢 Disgust
+    - 😨 Fear
+    - 😊 Happy
+    - 😐 Neutral
+    - 😢 Sad
+    - 😲 Surprise
+    """)
 
-    # Dictionary to label emotion categories
-    emotion_dict = {0: "Angry", 1: "Disgust", 2: "Fear", 3: "Happy", 4: "Neutral", 5: "Sad", 6: "Surprise"}
-
-    # Create a placeholder for the camera feed
-    video_placeholder = st.empty()
-
-    # Add control buttons
-    col1, col2 = st.columns(2)
-    with col1:
-        start_button = st.button("▶️ Start Detection")
-    with col2:
-        stop_button = st.button("⏹️ Stop Detection")
-
-    # Update session state based on button clicks
-    if start_button:
-        st.session_state['run_camera'] = True
-        if 'model' not in st.session_state:
-            with st.spinner('Loading model...'):
-                try:
-                    if model_choice == "CNN Model":
-                        model = tf.keras.models.load_model('Trained_Model.h5')
-                    else:
-                        model = tf.keras.models.load_model('emotion_vit_cnn_model.h5')
-                    st.session_state['model'] = model
-                except Exception as e:
-                    st.error(f"Error loading model: {str(e)}")
-                    st.session_state['run_camera'] = False
-
-    if stop_button:
-        st.session_state['run_camera'] = False
-
-    # Initialize camera state if not exists
-    if 'run_camera' not in st.session_state:
-        st.session_state['run_camera'] = False
-
-    # Main emotion detection loop
-    if st.session_state.get('run_camera', False):
-        try:
-            cap = cv2.VideoCapture(0)
-            
-            while st.session_state['run_camera']:
-                ret, frame = cap.read()
-                if not ret:
-                    st.error("Camera stream error. Please refresh the page.")
-                    break
-
-                # Your existing emotion detection code here
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                faces = cv2.CascadeClassifier(cv2.data.haarcascades + 
-                    'haarcascade_frontalface_default.xml').detectMultiScale(
-                    gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-
-                for (x, y, w, h) in faces:
-                    roi_gray = gray[y:y+h, x:x+w]
-                    roi_gray = cv2.resize(roi_gray, (48, 48))
-                    roi = roi_gray.astype('float')/255.0
-                    roi = np.expand_dims(roi, axis=-1)
-                    roi = np.expand_dims(roi, axis=0)
-                    
-                    prediction = st.session_state['model'].predict(roi, verbose=0)[0]
-                    label = emotion_dict[np.argmax(prediction)]
-                    
-                    cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                    cv2.putText(frame, label, (x, y-10), 
-                              cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
-
-                # Display the frame
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                video_placeholder.image(frame_rgb, channels="RGB")
-                time.sleep(0.01)
-
-        except Exception as e:
-            st.error(f"Camera error: {str(e)}")
-        finally:
-            if 'cap' in locals():
-                cap.release()
-
-# Add browser compatibility info in sidebar
-st.sidebar.markdown("""
-    ### 🌐 Browser Compatibility
-    Best experience with:
-    - Google Chrome (Recommended)
-    - Firefox
-    - Microsoft Edge
-    
-    ### 🔧 Troubleshooting
-    If camera doesn't work:
-    1. Check camera icon in address bar
-    2. Allow camera access
-    3. Refresh page
-    4. Try a different browser
-""")
+# Sidebar information
+st.sidebar.markdown(f"### Current Model: {model_choice}")
+if st.session_state.get('run_camera', False):
+    st.sidebar.success("Camera is running")
+else:
+    st.sidebar.warning("Camera is stopped")
