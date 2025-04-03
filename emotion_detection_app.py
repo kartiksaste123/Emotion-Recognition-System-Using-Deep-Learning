@@ -1,9 +1,12 @@
+# app.py
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 import streamlit as st
 import numpy as np
 import cv2
 import tensorflow as tf
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, WebRtcMode
-from PIL import Image
 
 # Clear any existing TensorFlow sessions
 tf.keras.backend.clear_session()
@@ -18,12 +21,15 @@ st.write("Live emotion detection from webcam feed")
 # Model selection
 model_choice = st.radio(
     "Select the model for emotion detection:",
-    ("CNN Model", "ViT-CNN Model")
+    ("CNN Model", "ViT-CNN Model"),
+    horizontal=True
 )
 
 # Dictionary to label emotion categories
-emotion_dict = {0: "Angry", 1: "Disgust", 2: "Fear", 3: "Happy", 
-                4: "Neutral", 5: "Sad", 6: "Surprise"}
+emotion_dict = {
+    0: "Angry", 1: "Disgust", 2: "Fear", 3: "Happy",
+    4: "Neutral", 5: "Sad", 6: "Surprise"
+}
 
 @st.cache_resource
 def get_model():
@@ -45,19 +51,15 @@ def load_face_cascade():
         st.error(f"Error loading face cascade: {str(e)}")
         return None
 
-# Load models
-model = get_model()
-face_cascade = load_face_cascade()
-
 class EmotionDetectionProcessor(VideoProcessorBase):
     def __init__(self):
-        self.model = model
-        self.face_cascade = face_cascade
-
+        self.model = get_model()
+        self.face_cascade = load_face_cascade()
+        
     def recv(self, frame):
         img = frame.to_ndarray(format="bgr24")
         
-        # Convert to grayscale
+        # Convert to grayscale for face detection
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         
         # Detect faces
@@ -92,33 +94,45 @@ class EmotionDetectionProcessor(VideoProcessorBase):
         
         return img
 
-# Create the WebRTC component
-webrtc_ctx = webrtc_streamer(
-    key="emotion-detection",
-    mode=WebRtcMode.SENDRECV,
-    video_processor_factory=EmotionDetectionProcessor,
-    media_stream_constraints={"video": True, "audio": False},
-    async_processing=True,
-)
+def main():
+    st.sidebar.markdown(f"### Current Model: {model_choice}")
+    st.sidebar.markdown("### Detected Emotions:")
+    st.sidebar.markdown("""
+    - 😠 Angry
+    - 🤢 Disgust
+    - 😨 Fear
+    - 😊 Happy
+    - 😐 Neutral
+    - 😢 Sad
+    - 😲 Surprise
+    """)
+    
+    webrtc_ctx = webrtc_streamer(
+        key="emotion-detection",
+        mode=WebRtcMode.SENDRECV,
+        video_processor_factory=EmotionDetectionProcessor,
+        media_stream_constraints={
+            "video": {
+                "width": {"ideal": 640},
+                "height": {"ideal": 480},
+                "frameRate": {"ideal": 15}
+            },
+            "audio": False
+        },
+        rtc_configuration={
+            "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+        },
+        async_processing=True,
+    )
 
-# Information sections
-st.markdown("### Instructions:")
-st.markdown("""
-1. Select your preferred model
-2. Click "START" to begin video streaming
-3. Look at the camera
-4. See real-time emotion detection results
-5. Click "STOP" to end
-""")
+    st.markdown("### Instructions:")
+    st.markdown("""
+    1. Select your preferred model
+    2. Click "START" to begin video streaming
+    3. Look at the camera
+    4. See real-time emotion detection results
+    5. Click "STOP" to end
+    """)
 
-st.sidebar.markdown(f"### Current Model: {model_choice}")
-st.sidebar.markdown("### Detected Emotions:")
-st.sidebar.markdown("""
-- 😠 Angry
-- 🤢 Disgust
-- 😨 Fear
-- 😊 Happy
-- 😐 Neutral
-- 😢 Sad
-- 😲 Surprise
-""")
+if __name__ == "__main__":
+    main()
