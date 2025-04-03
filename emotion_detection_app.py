@@ -2,17 +2,18 @@ import streamlit as st
 import numpy as np
 import cv2
 import tensorflow as tf
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, WebRtcMode
 from PIL import Image
 
-# Clear any existing TensorFlow sessions at startup
+# Clear any existing TensorFlow sessions
 tf.keras.backend.clear_session()
 
 # Set page config
-st.set_page_config(page_title="Emotion Detection App", layout="wide")
+st.set_page_config(page_title="Live Emotion Detection", layout="wide")
 
 # Title and description
 st.title("Real-time Emotion Detection")
-st.write("Choose a model and start detecting emotions!")
+st.write("Live emotion detection from webcam feed")
 
 # Model selection
 model_choice = st.radio(
@@ -44,62 +45,70 @@ def load_face_cascade():
         st.error(f"Error loading face cascade: {str(e)}")
         return None
 
-# Initialize components
+# Load models
 model = get_model()
 face_cascade = load_face_cascade()
 
-# Camera input and processing
-img_file_buffer = st.camera_input("Take a photo for emotion detection")
+class EmotionDetectionProcessor(VideoProcessorBase):
+    def __init__(self):
+        self.model = model
+        self.face_cascade = face_cascade
 
-if img_file_buffer is not None:
-    # Convert buffer to OpenCV format
-    bytes_data = img_file_buffer.getvalue()
-    cv2_img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
-    
-    # Convert to grayscale
-    gray = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2GRAY)
-    
-    # Detect faces
-    faces = face_cascade.detectMultiScale(
-        gray,
-        scaleFactor=1.1,
-        minNeighbors=5,
-        minSize=(30, 30)
-    )
-    
-    # Process each face
-    for (x, y, w, h) in faces:
-        cv2.rectangle(cv2_img, (x, y), (x+w, y+h), (0, 255, 0), 2)
-        roi_gray = gray[y:y+h, x:x+w]
-        roi_gray = cv2.resize(roi_gray, (48, 48), interpolation=cv2.INTER_AREA)
+    def recv(self, frame):
+        img = frame.to_ndarray(format="bgr24")
         
-        if np.sum([roi_gray]) != 0:
-            roi = roi_gray.astype('float') / 255.0
-            roi = np.expand_dims(roi, axis=-1)
-            roi = np.expand_dims(roi, axis=0)
+        # Convert to grayscale
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        
+        # Detect faces
+        faces = self.face_cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.1,
+            minNeighbors=5,
+            minSize=(30, 30)
+        )
+        
+        # Process each face
+        for (x, y, w, h) in faces:
+            cv2.rectangle(img, (x, y), (x+w, y+h), (0, 255, 0), 2)
+            roi_gray = gray[y:y+h, x:x+w]
+            roi_gray = cv2.resize(roi_gray, (48, 48), interpolation=cv2.INTER_AREA)
             
-            try:
-                prediction = model.predict(roi, verbose=0)[0]
-                emotion_label = emotion_dict[np.argmax(prediction)]
-                confidence = float(np.max(prediction) * 100)
+            if np.sum([roi_gray]) != 0:
+                roi = roi_gray.astype('float') / 255.0
+                roi = np.expand_dims(roi, axis=-1)
+                roi = np.expand_dims(roi, axis=0)
                 
-                label_text = f"{emotion_label} ({confidence:.1f}%)"
-                cv2.putText(cv2_img, label_text, (x, y-10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-            except Exception as e:
-                st.error(f"Prediction error: {str(e)}")
-    
-    # Display processed image
-    st.image(cv2.cvtColor(cv2_img, cv2.COLOR_BGR2RGB), 
-             caption="Processed Image", use_column_width=True)
+                try:
+                    prediction = self.model.predict(roi, verbose=0)[0]
+                    emotion_label = emotion_dict[np.argmax(prediction)]
+                    confidence = float(np.max(prediction) * 100)
+                    
+                    label_text = f"{emotion_label} ({confidence:.1f}%)"
+                    cv2.putText(img, label_text, (x, y-10),
+                              cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                except Exception as e:
+                    pass
+        
+        return img
+
+# Create the WebRTC component
+webrtc_ctx = webrtc_streamer(
+    key="emotion-detection",
+    mode=WebRtcMode.SENDRECV,
+    video_processor_factory=EmotionDetectionProcessor,
+    media_stream_constraints={"video": True, "audio": False},
+    async_processing=True,
+)
 
 # Information sections
 st.markdown("### Instructions:")
 st.markdown("""
 1. Select your preferred model
-2. Allow camera access when prompted
+2. Click "START" to begin video streaming
 3. Look at the camera
 4. See real-time emotion detection results
+5. Click "STOP" to end
 """)
 
 st.sidebar.markdown(f"### Current Model: {model_choice}")
