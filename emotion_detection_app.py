@@ -8,38 +8,38 @@ import time
 tf.keras.backend.clear_session()
 
 # Set page config
-st.set_page_config(page_title="Emotion Detection App", layout="wide")
+st.set_page_config(page_title="Emotion Detection", layout="wide")
 
 # Title and description
 st.title("Real-time Emotion Detection")
-st.write("Choose a model and start detecting emotions!")
+st.write("Camera access required - please allow permissions in your browser")
 
-# Dictionary to label emotion categories
+# Dictionary to label emotions
 emotion_dict = {0: "Angry", 1: "Disgust", 2: "Fear", 3: "Happy", 
                 4: "Neutral", 5: "Sad", 6: "Surprise"}
 
 # Model selection
 model_choice = st.radio(
-    "Select the model for emotion detection:",
-    ("CNN Model", "ViT-CNN Model")
+    "Select Model:",
+    ("CNN Model", "ViT-CNN Model"),
+    horizontal=True
 )
 
 @st.cache_resource
-def load_face_cascade():
-    return cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+def load_resources():
+    # Load face cascade
+    face_cascade = cv2.CascadeClassifier(
+        cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+    )
+    
+    # Load appropriate model
+    model_path = 'Trained_Model.h5' if model_choice == "CNN Model" else 'emotion_vit_cnn_model.h5'
+    model = tf.keras.models.load_model(model_path, compile=False)
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    
+    return face_cascade, model
 
-@st.cache_resource
-def load_model(model_choice):
-    try:
-        model_path = 'Trained_Model.h5' if model_choice == "CNN Model" else 'emotion_vit_cnn_model.h5'
-        model = tf.keras.models.load_model(model_path, compile=False)
-        model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
-        return model
-    except Exception as e:
-        st.error(f"Error loading model: {str(e)}")
-        return None
-
-def process_image(img, model, face_cascade):
+def process_frame(img, face_cascade, model):
     # Convert to grayscale
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
@@ -74,31 +74,27 @@ def process_image(img, model, face_cascade):
     
     return img
 
-# Main app logic
+# Main application logic
 def main():
-    face_cascade = load_face_cascade()
-    model = load_model(model_choice)
+    # Load resources
+    face_cascade, model = load_resources()
     
-    if model is None or face_cascade is None:
-        st.error("Failed to initialize required components")
-        return
-
-    # Camera input
-    img_file_buffer = st.camera_input("Take a picture for emotion detection")
-
+    # Camera input with periodic refresh
+    img_file_buffer = st.camera_input("Looking for emotions...")
+    
     if img_file_buffer is not None:
         # Convert buffer to OpenCV format
         bytes_data = img_file_buffer.getvalue()
         cv2_img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
         
-        # Process image
-        processed_img = process_image(cv2_img, model, face_cascade)
+        # Process frame
+        processed_img = process_frame(cv2_img, face_cascade, model)
         
         # Display results
         st.image(processed_img, channels="BGR", use_container_width=True)
-
-        # Auto-refresh after 2 seconds
-        time.sleep(2)
+        
+        # Auto-refresh after short delay
+        time.sleep(0.1)
         st.experimental_rerun()
 
 if __name__ == "__main__":
