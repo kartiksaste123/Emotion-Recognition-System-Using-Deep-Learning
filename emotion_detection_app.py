@@ -81,7 +81,7 @@ if img_file_buffer is not None:
             try:
                 prediction = model.predict(roi, verbose=0)[0]
                 emotion_label = emotion_dict[np.argmax(prediction)]
-                confidence = float(np.max(prediction) * 100
+                confidence = float(np.max(prediction) * 100)
                 
                 label_text = f"{emotion_label} ({confidence:.1f}%)"
                 cv2.putText(cv2_img, label_text, (x, y-10),
