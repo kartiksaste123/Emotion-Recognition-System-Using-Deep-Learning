@@ -3,5 +3,3 @@ opencv-python-headless
 tensorflow-cpu
 numpy
 h5py
-streamlit-webrtc==0.45.3
-
