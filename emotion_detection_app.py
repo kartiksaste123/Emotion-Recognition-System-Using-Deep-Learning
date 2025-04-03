@@ -107,10 +107,10 @@ class EmotionVideoTransformer(VideoTransformerBase):
 # Start the live webcam feed with the emotion detection processor
 st.header("Live Camera Feed")
 webrtc_streamer(
-    key="emotion-detection",
-    video_transformer_factory=EmotionVideoTransformer,
-    rtc_configuration=rtc_configuration
+    key="example",
+    video_processor_factory=YourVideoTransformerClass,  # Use this instead
 )
+
 
 # Sidebar and instructions
 st.sidebar.markdown(f"### Current Model: {model_choice}")
