@@ -4,3 +4,5 @@ tensorflow-cpu
 numpy
 h5py
 streamlit-webrtc
+av
+aiortc
